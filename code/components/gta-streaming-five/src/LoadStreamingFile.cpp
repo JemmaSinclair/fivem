@@ -1498,6 +1498,11 @@ static CDataFileMountInterface* LookupDataFileMounter(const std::string& type)
 		return &g_staticCacheMounter;
 	}
 
+	if (type == "VEHICLE_PLATE_FILE")
+	{
+		return &g_staticPseudoMounter;
+	}
+
 	int fileType = LookupDataFileType(type);
 
 	if (fileType < 0)
