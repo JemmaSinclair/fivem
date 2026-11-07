@@ -318,7 +318,7 @@ std::optional<TicketData> VerifyTicketEx(const std::string& ticket, const Botan:
 	size_t length = static_cast<size_t>(*(uint32_t*)&ticketData[20 + 4 + 128]);
 
 	// validate full length
-	if (ticketData.size() < 20 + 4 + 128 + 4 + length)
+	if (ticketData.size() < 20 + 4 + 128 + 4 + length + 4 + 128)
 	{
 		return {};
 	}
@@ -370,7 +370,7 @@ std::optional<TicketData> VerifyTicketEx(const std::string& ticket, const Botan:
 	{
 		uint32_t extraJsonLength = *(uint32_t*)&extraData[20];
 
-		if (length >= (24 + extraJsonLength))
+		if (extraJsonLength <= length - 24)
 		{
 			outData.extraJson = std::string{ (char*)&extraData[24], extraJsonLength };
 		}
@@ -381,12 +381,15 @@ std::optional<TicketData> VerifyTicketEx(const std::string& ticket, const Botan:
 }
 
 extern std::shared_ptr<ConVar<bool>> g_oneSyncVar;
+std::shared_ptr<ConVar<bool>> g_enforceSteamAuth;
 fx::GameBuild g_enforcedGameBuild;
 
 static InitFunction initFunction([]()
 {
 	fx::ServerInstanceBase::OnServerCreate.Connect([](fx::ServerInstanceBase* instance)
 	{
+		g_enforceSteamAuth = instance->AddVariable<bool>("sv_enforceSteamAuth", ConVar_ServerInfo, false);
+
 		auto minTrustVar = instance->AddVariable<int>("sv_authMinTrust", ConVar_None, 1);
 		minTrustVar->GetHelper()->SetConstraints(1, 5);
 
@@ -900,6 +903,8 @@ static InitFunction initFunction([]()
 				int maxTrust = INT_MIN;
 				int minVariance = INT_MAX;
 
+				bool steamPresent = false;
+
 				for (const auto& identifier : lockedClient->GetIdentifiers())
 				{
 					std::string idType = identifier.substr(0, identifier.find_first_of(':'));
@@ -911,6 +916,23 @@ static InitFunction initFunction([]()
 						maxTrust = std::max(provider->GetTrustLevel(), maxTrust);
 						minVariance = std::min(provider->GetVarianceLevel(), minVariance);
 					}
+
+					if (idType == "steam")
+					{
+						steamPresent = true;
+					}
+				}
+
+				if (!steamPresent && g_enforceSteamAuth->GetValue())
+				{
+					sendError("No linked Steam account was found while this server requires one. Please try restarting your game.");
+					return;
+				}
+				else if (steamPresent)
+				{
+					// Ugly but lets not break legacy stuff.
+					maxTrust = std::max(5, maxTrust);
+					minVariance = std::min(1, minVariance);
 				}
 
 				if (maxTrust < minTrustVar->GetValue() || minVariance > maxVarianceVar->GetValue())
